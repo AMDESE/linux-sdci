@@ -326,6 +326,8 @@ static long local_pci_probe(void *_ddi)
 	if (!rc) {
 		if (pci_tph_disabled())
 			pcie_tph_disable(pci_dev);
+		if (pci_tph_nostmode())
+			tph_set_dev_nostmode(pci_dev);
 		return rc;
 	}
 	if (rc < 0) {
