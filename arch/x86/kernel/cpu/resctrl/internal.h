@@ -577,5 +577,6 @@ void rdt_domain_reconfigure_cdp(struct rdt_resource *r);
 void __init thread_throttle_mode_init(void);
 void __init mbm_config_rftype_init(const char *config);
 void rdt_staged_configs_clear(void);
+void __init resctrl_sdciae_rftype_init(void);
 
 #endif /* _ASM_X86_RESCTRL_INTERNAL_H */
