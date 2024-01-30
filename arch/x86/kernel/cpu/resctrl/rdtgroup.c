@@ -821,6 +821,19 @@ static int resctrl_sdciae_capable_show(struct kernfs_open_file *of,
 	return 0;
 }
 
+static int resctrl_sdciae_enable_show(struct kernfs_open_file *of,
+				      struct seq_file *seq, void *v)
+{
+	struct resctrl_schema *s = of->kn->parent->priv;
+	struct rdt_resource *r = s->res;
+	struct rdt_hw_resource *hw_res;
+
+	hw_res = resctrl_to_arch_res(r);
+
+	seq_printf(seq, "%x\n", hw_res->sdciae_enabled);
+	return 0;
+}
+
 #ifdef CONFIG_PROC_CPU_RESCTRL
 
 /*
@@ -1981,6 +1994,12 @@ static struct rftype res_common_files[] = {
 		.seq_show	= resctrl_sdciae_capable_show,
 	},
 	{
+		.name		= "sdciae_enable",
+		.mode		= 0444,
+		.kf_ops		= &rdtgroup_kf_single_ops,
+		.seq_show	= resctrl_sdciae_enable_show,
+	},
+	{
 		.name		= "mode",
 		.mode		= 0644,
 		.kf_ops		= &rdtgroup_kf_single_ops,
@@ -2084,6 +2103,10 @@ void __init resctrl_sdciae_rftype_init(void)
 	struct rftype *rft;
 
 	rft = rdtgroup_get_rftype_by_name("sdciae_capable");
+	if (rft)
+		rft->fflags = RFTYPE_CTRL_INFO | RFTYPE_RES_CACHE;
+
+	rft = rdtgroup_get_rftype_by_name("sdciae_enable");
 	if (rft)
 		rft->fflags = RFTYPE_CTRL_INFO | RFTYPE_RES_CACHE;
 }
