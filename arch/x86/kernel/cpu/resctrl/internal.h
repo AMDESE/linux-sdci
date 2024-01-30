@@ -57,6 +57,9 @@
 /* L3 SDCIAE ENABLE */
 #define SDCIAE_ENABLE			BIT(1)
 
+/* L3 SDCIAE CLOSID */
+#define SDCIAE_CLOSID			15
+
 struct rdt_fs_context {
 	struct kernfs_fs_context	kfc;
 	bool				enable_cdpl2;

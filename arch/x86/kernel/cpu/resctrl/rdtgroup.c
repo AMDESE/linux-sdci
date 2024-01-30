@@ -152,6 +152,16 @@ void closid_free(int closid)
 	closid_free_map |= 1 << closid;
 }
 
+static int closid_alloc_sdciae(void)
+{
+	if (closid_free_map & (1 << SDCIAE_CLOSID)) {
+		closid_free_map &= ~(1 << SDCIAE_CLOSID);
+		return SDCIAE_CLOSID;
+	} else {
+		return -ENOSPC;
+	}
+}
+
 /**
  * closid_allocated - test if provided closid is in use
  * @closid: closid to be tested
@@ -1835,6 +1845,42 @@ int resctrl_arch_set_sdciae_enabled(enum resctrl_res_level l, bool enable)
 	return 0;
 }
 
+static ssize_t resctrl_sdciae_enable_write(struct kernfs_open_file *of,
+					   char *buf, size_t nbytes, loff_t off)
+{
+	struct resctrl_schema *s = of->kn->parent->priv;
+	struct rdt_resource *r = s->res;
+	struct rdt_hw_resource *hw_res;
+	unsigned int enable;
+	int ret;
+
+	hw_res = resctrl_to_arch_res(r);
+
+	if (!r->sdciae_capable)
+		return -ENOENT;
+
+	ret = kstrtouint(buf, 0, &enable);
+	if (ret)
+		return ret;
+
+	/* Update the MSR only when there is a change */
+	if (hw_res->sdciae_enabled != enable) {
+		if (enable) {
+			ret = closid_alloc_sdciae();
+			if (ret < 0) {
+				rdt_last_cmd_puts("SDCIAE CLOSID is not available\n");
+				return ret;
+			}
+		} else {
+			closid_free(SDCIAE_CLOSID);
+		}
+
+		resctrl_arch_set_sdciae_enabled(RDT_RESOURCE_L3, enable);
+	}
+
+	return ret ?: nbytes;
+}
+
 /* rdtgroup information files for one cache resource. */
 static struct rftype res_common_files[] = {
 	{
@@ -1995,9 +2041,10 @@ static struct rftype res_common_files[] = {
 	},
 	{
 		.name		= "sdciae_enable",
-		.mode		= 0444,
+		.mode		= 0644,
 		.kf_ops		= &rdtgroup_kf_single_ops,
 		.seq_show	= resctrl_sdciae_enable_show,
+		.write		= resctrl_sdciae_enable_write,
 	},
 	{
 		.name		= "mode",
