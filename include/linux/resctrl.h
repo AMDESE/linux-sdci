@@ -168,6 +168,7 @@ struct resctrl_schema;
  * @evt_list:		List of monitoring events
  * @fflags:		flags to choose base and info files
  * @cdp_capable:	Is the CDP feature available on this resource
+ * @sdciae_capable:	Is SDCIAE feature available on this resource
  */
 struct rdt_resource {
 	int			rid;
@@ -188,6 +189,7 @@ struct rdt_resource {
 	struct list_head	evt_list;
 	unsigned long		fflags;
 	bool			cdp_capable;
+	bool			sdciae_capable;
 };
 
 /**

@@ -309,6 +309,11 @@ static void rdt_get_cdp_l2_config(void)
 	rdt_get_cdp_config(RDT_RESOURCE_L2);
 }
 
+static void rdt_get_sdciae_alloc_cfg(struct rdt_resource *r)
+{
+	r->sdciae_capable = true;
+}
+
 static void
 mba_wrmsr_amd(struct rdt_domain *d, struct msr_param *m, struct rdt_resource *r)
 {
@@ -786,6 +791,13 @@ static __init bool get_rdt_alloc_resources(void)
 			rdt_get_cdp_l3_config();
 		ret = true;
 	}
+
+	if (rdt_cpu_has(X86_FEATURE_SDCIAE)) {
+		r = &rdt_resources_all[RDT_RESOURCE_L3].r_resctrl;
+		rdt_get_sdciae_alloc_cfg(r);
+		ret = true;
+	}
+
 	if (rdt_cpu_has(X86_FEATURE_CAT_L2)) {
 		/* CPUID 0x10.2 fields are same format at 0x10.1 */
 		r = &rdt_resources_all[RDT_RESOURCE_L2].r_resctrl;
