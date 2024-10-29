@@ -6995,6 +6995,20 @@ static int bnxt_hwrm_cp_ring_alloc_p5(struct bnxt *bp, struct bnxt_cp_ring_info 
 	return 0;
 }
 
+static int bnxt_hwrm_tx_ring_alloc(struct bnxt *bp, struct bnxt_tx_ring_info *txr,
+				   u32 tx_idx)
+{
+	struct bnxt_ring_struct *ring = &txr->tx_ring_struct;
+	u32 type = HWRM_RING_ALLOC_TX;
+	int rc;
+
+	rc = hwrm_ring_alloc_send_msg(bp, ring, type, tx_idx);
+	if (rc)
+		return rc;
+	bnxt_set_db(bp, &txr->tx_db, type, tx_idx, ring->fw_ring_id);
+	return 0;
+}
+
 static int bnxt_hwrm_rx_ring_alloc(struct bnxt *bp,
 				   struct bnxt_rx_ring_info *rxr)
 {
@@ -7171,6 +7185,26 @@ exit:
 		return -EIO;
 	}
 	return 0;
+}
+
+static void bnxt_hwrm_tx_ring_free(struct bnxt *bp, struct bnxt_tx_ring_info *txr,
+				   bool close_path)
+{
+	struct bnxt_ring_struct *ring = &txr->tx_ring_struct;
+	u32 cmpl_ring_id;
+
+	if (ring->fw_ring_id == INVALID_HW_RING_ID)
+		return;
+
+	cmpl_ring_id = close_path ? bnxt_cp_ring_for_tx(bp, txr) :
+		       INVALID_HW_RING_ID;
+#ifdef DEV_NETMAP
+	if (txr->tx_cpr->netmapped)
+		bnxt_netmap_txflush(txr);
+#endif
+	hwrm_ring_free_send_msg(bp, ring, RING_FREE_REQ_RING_TYPE_TX,
+				cmpl_ring_id);
+	ring->fw_ring_id = INVALID_HW_RING_ID;
 }
 
 static void bnxt_hwrm_rx_ring_free(struct bnxt *bp,
@@ -15345,11 +15379,13 @@ static int bnxt_queue_start(struct net_device *dev, void *qmem, int idx)
 {
 	struct bnxt *bp = netdev_priv(dev);
 	struct bnxt_rx_ring_info *rxr, *clone;
+	struct bnxt_tx_ring_info *txr;
 	struct bnxt_cp_ring_info *cpr;
 	struct bnxt_vnic_info *vnic;
 	int i, rc;
 
 	rxr = &bp->rx_ring[idx];
+	txr = &bp->tx_ring[idx];
 	clone = qmem;
 
 	rxr->rx_prod = clone->rx_prod;
@@ -15383,6 +15419,26 @@ static int bnxt_queue_start(struct net_device *dev, void *qmem, int idx)
 	INIT_WORK(&cpr->dim.work, bnxt_dim_work);
 	cpr->dim.mode = DIM_CQ_PERIOD_MODE_START_FROM_EQE;
 
+	/* No need to rollback if Rx ring reset has worked */
+	rc = bnxt_hwrm_cp_ring_alloc_p5(bp, txr->tx_cpr);
+	if (rc)
+		return rc;
+
+	rc = bnxt_hwrm_tx_ring_alloc(bp, txr, false);
+	if (rc) {
+		bnxt_hwrm_cp_ring_free(bp, txr->tx_cpr);
+		return rc;
+	}
+
+	txr->tx_prod = 0;
+	txr->tx_cons = 0;
+	txr->tx_hw_cons = 0;
+
+	WRITE_ONCE(txr->dev_state, 0);
+	synchronize_net();
+
+	netif_start_subqueue(bp->dev, txr->txq_index);
+
 	napi_enable(&rxr->bnapi->napi);
 
 	for (i = 0; i <= BNXT_VNIC_NTUPLE; i++) {
@@ -15395,6 +15451,7 @@ static int bnxt_queue_start(struct net_device *dev, void *qmem, int idx)
 			return rc;
 		}
 		vnic->mru = bp->dev->mtu + ETH_HLEN + VLAN_HLEN;
+
 		bnxt_hwrm_vnic_update(bp, vnic,
 				      VNIC_UPDATE_REQ_ENABLES_MRU_VALID);
 	}
@@ -15411,6 +15468,7 @@ static int bnxt_queue_stop(struct net_device *dev, void *qmem, int idx)
 {
 	struct bnxt *bp = netdev_priv(dev);
 	struct bnxt_rx_ring_info *rxr;
+	struct bnxt_tx_ring_info *txr;
 	struct bnxt_cp_ring_info *cpr;
 	struct bnxt_vnic_info *vnic;
 	struct bnxt_napi *bnapi;
@@ -15434,6 +15492,14 @@ static int bnxt_queue_stop(struct net_device *dev, void *qmem, int idx)
 	cancel_work_sync(&cpr->dim.work);
 
 	bnxt_free_one_cp_ring(bp, rxr->rx_cpr);
+
+	txr = &bp->tx_ring[idx];
+	WRITE_ONCE(txr->dev_state, BNXT_DEV_STATE_CLOSING);
+	synchronize_net();
+	netif_stop_subqueue(bp->dev, txr->txq_index);
+
+	bnxt_hwrm_tx_ring_free(bp, txr, false);
+	bnxt_free_one_cp_ring(bp, txr->tx_cpr);
 
 	memcpy(qmem, rxr, sizeof(*rxr));
 	bnxt_init_rx_ring_struct(bp, qmem);
